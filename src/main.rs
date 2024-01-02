@@ -1,23 +1,47 @@
 use aws_config::BehaviorVersion;
-use lambda_http::{run, service_fn, Body, Error, Request, Response};
+use lambda_http::{http, run, service_fn, Body, Error, Request, Response};
+use serde_json::Value;
 
-/// This is the main body for the function.
-/// Write your code inside it.
-/// There are some code example in the following URLs:
-/// - https://github.com/awslabs/aws-lambda-rust-runtime/tree/main/examples
+// Process an HTTP request
 async fn function_handler(
-    _event: Request,
+    event: Request,
     _client: &aws_sdk_sesv2::Client,
 ) -> Result<Response<Body>, Error> {
-    let message = format!("Not implemented");
+    // We only support POST requests; otherwise, return a 405 Method Not Allowed
+    if event.method() != http::Method::POST {
+        return Ok(Response::builder()
+            .status(http::StatusCode::METHOD_NOT_ALLOWED)
+            .body("Method Not Allowed".into())?);
+    }
 
-    // Return something that implements IntoResponse.
-    // It will be serialized to the right response event automatically by the runtime
+    // Parse the body as JSON; on failure, return a 400 Bad Request
+    let Ok(body) = serde_json::from_slice::<Value>(event.body()) else {
+        return Ok(Response::builder()
+            .status(http::StatusCode::BAD_REQUEST)
+            .body("Invalid JSON format in request body".into())?);
+    };
+
+    // Get the email key; on failure, return a 400 Bad Request
+    let email = match body.get("email") {
+        None => {
+            return Ok(Response::builder()
+                .status(http::StatusCode::BAD_REQUEST)
+                .body("JSON object must contain the key \"email\"".into())?);
+        }
+        Some(Value::String(email)) => email,
+        Some(_) => {
+            return Ok(Response::builder()
+                .status(http::StatusCode::BAD_REQUEST)
+                .body("JSON object must contain a string value for the key \"email\"".into())?);
+        }
+    };
+
+    // Return success on properly processed webhook
+    let message = format!("Webhook got email: {email}");
     let resp = Response::builder()
         .status(200)
         .header("content-type", "text/html")
-        .body(message.into())
-        .map_err(Box::new)?;
+        .body(message.into())?;
     Ok(resp)
 }
 
